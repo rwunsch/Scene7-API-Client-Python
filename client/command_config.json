@@ -1,0 +1,10 @@
+{
+    "commands": [
+        {
+            "name": "getCompanyInfo",
+            "params": {
+                "companyName": "RobertCo"
+            }
+        }
+    ]
+}

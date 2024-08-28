@@ -1,0 +1,7 @@
+{
+    "username": "<scene7-user>",
+    "password": "<scene7-password>",
+    "wsdl_url": "https://s7sps3apissl.scene7.com/scene7/webservice/IpsApi-2014-04-03.wsdl",
+    "service_url": "https://s7sps3apissl.scene7.com/scene7/services/IpsApiService",
+    "debug": false
+}
