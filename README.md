@@ -1,10 +1,10 @@
 # Scene7 API Client
 
-This repository contains a Python script (`scene7api.py`) to interface with Adobe's Scene7 IPS Web Service WSDL via SOAP. The script allows you to call various API methods, either by specifying them in a configuration file (`command_config.json`) or by passing them as command-line parameters. Command-line parameters take precedence over the configuration file.
+This repository contains a Python script (`scene7api.py`) to interface with Adobe's [Scene7 IPS Web Service WSDL via SOAP](https://experienceleague.adobe.com/en/docs/dynamic-media-developer-resources/image-production-api/c-wsdl-versions). The script allows you to call various [API methods](https://experienceleague.adobe.com/en/docs/dynamic-media-developer-resources/image-production-api/operation-methods/operation-parameters/c-methods), either by specifying them in a configuration file (`command_config.json`) or by passing them as command-line parameters. Command-line parameters take precedence over the configuration file.
 
 ## Features
 
-- Call Adobe Scene7 IPS Web Service API methods.
+- Call [Adobe Scene7 IPS Web Service API methods](https://experienceleague.adobe.com/en/docs/dynamic-media-developer-resources/image-production-api/operation-methods/operation-parameters/c-methods).
 - Support for both configuration file and command-line parameters.
 - Debugging capabilities to log raw SOAP requests and responses.
 - Detailed help function for command-line usage.
