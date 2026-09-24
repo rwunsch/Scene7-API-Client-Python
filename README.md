@@ -1,158 +1,150 @@
 # Scene7 API Client
 
-This repository contains a Python script (`scene7api.py`) to interface with Adobe's [Scene7 IPS Web Service WSDL via SOAP](https://experienceleague.adobe.com/en/docs/dynamic-media-developer-resources/image-production-api/c-wsdl-versions). The script allows you to call various [API methods](https://experienceleague.adobe.com/en/docs/dynamic-media-developer-resources/image-production-api/operation-methods/operation-parameters/c-methods), either by specifying them in a configuration file (`command_config.json`) or by passing them as command-line parameters. Command-line parameters take precedence over the configuration file.
+A Python client for Adobe's [Scene7 IPS Web Service](https://experienceleague.adobe.com/en/docs/dynamic-media-developer-resources/image-production-api/c-wsdl-versions), the SOAP API behind Dynamic Media Classic.
 
-## Features
+It is a thin generic dispatcher over the WSDL: every operation the WSDL exposes is callable without per-operation code. Against the 2014-04-03 WSDL that is 328 operations. Calls can be given on the command line or in `command_config.json`; command-line arguments win.
 
-- Call [Adobe Scene7 IPS Web Service API methods](https://experienceleague.adobe.com/en/docs/dynamic-media-developer-resources/image-production-api/operation-methods/operation-parameters/c-methods).
-- Support for both configuration file and command-line parameters.
-- Debugging capabilities to log raw SOAP requests and responses.
-- Detailed help function for command-line usage.
+## Authentication, and the fault that wastes an afternoon
+
+`authHeader` is declared in **two** namespaces and only one of them authenticates. The server honours the header in the **versioned** namespace that the operations themselves use (for the 2014-04-03 WSDL, `.../IpsApi/xsd/2014-04-03`). The same header in the unversioned `.../IpsApi/xsd` passes schema validation, is rendered onto the wire, and is then ignored:
+
+```
+authenticationFault 10000
+No authentication credentials found in SOAP header or HTTP Basic header
+```
+
+That message says no credentials were sent while the credentials are plainly visible in the request envelope, which sends you looking at TLS, proxies and entitlements rather than at the namespace. The versioned element also requires `appName`; leaving it out fails zeep's own validation, which is at least an honest error.
+
+Measured against the EMEA endpoint on 2026-09-24:
+
+| Header form | Result |
+|---|---|
+| Unversioned namespace, no `appName` | fault 10000, no credentials found |
+| Unversioned namespace, with `appName` | fault 10000, no credentials found |
+| Versioned namespace, no `appName` | zeep `ValidationError`, `appName` required |
+| **Versioned namespace, with `appName`** | **success** |
+| **HTTP Basic, no SOAP header** | **success** |
+
+The client resolves the namespace from the WSDL rather than hardcoding a date, so a newer WSDL version is followed automatically.
+
+Both modes work. The SOAP header is the default, because it is what the WSDL declares and it carries `locale` and `gzipResponse` alongside the credentials. `--auth-mode basic` is the shorter path when the header is being awkward.
 
 ## Prerequisites
 
-- Python 3.x
-- `zeep` library for SOAP client
-- `requests` library for HTTP requests
-
-You can install the required libraries using pip:
+Python 3.x, plus:
 
 ```bash
-pip install zeep requests
+pip install zeep requests lxml
 ```
 
 ## Configuration
 
 ### auth_config.json
 
-This file contains the authentication details and other configuration settings.
+Not in version control. Copy the example and fill it in:
+
+```bash
+cp client/auth_config.json.example client/auth_config.json
+```
 
 ```json
 {
-    "username": "your_username",
-    "password": "your_password",
+    "username": "you@example.com",
+    "password": "",
     "wsdl_url": "https://s7sps3apissl.scene7.com/scene7/webservice/IpsApi-2014-04-03.wsdl",
     "service_url": "https://s7sps3apissl.scene7.com/scene7/services/IpsApiService",
-    "debug": true
+    "debug": false
 }
 ```
 
+**Prefer the environment variable for the password**, so the credential is never in a file:
+
+```bash
+export SCENE7_PASSWORD='...'
+```
+
+`SCENE7_PASSWORD` overrides `password` in the config. `--region` overrides `wsdl_url` and `service_url`, so with it the config needs only a username.
+
+### Regional endpoints
+
+| Region | Endpoint |
+|---|---|
+| `na` | `s7sps1apissl.scene7.com` |
+| `emea` | `s7sps3apissl.scene7.com` |
+| `apac` | `s7sps5apissl.scene7.com` |
+
+These are the endpoints AEM itself publishes at `/libs/settings/dam/scene7/endpoints`. Calling the wrong region for a company returns an authentication fault, not a redirect.
+
 ### command_config.json
 
-This file contains the API commands you want to execute.
+Used when no `--method` is given:
 
 ```json
 {
     "commands": [
-        {
-            "name": "getCompanyInfo",
-            "params": {
-                "companyName": "Planetary"
-            }
-        }
+        { "name": "getCompanyInfo", "params": { "companyName": "ExampleCo" } }
     ]
 }
 ```
 
 ## Usage
 
-### Running the Script with Command-Line Parameters
+```bash
+# simple, flat parameters
+python3 client/scene7api.py --method getCompanyInfo --params companyName=ExampleCo
 
-You can run the script with multiple key-value pairs as parameters. For example:
+# pick a region rather than editing the config
+python3 client/scene7api.py --region emea --method getCompanyInfo --params companyName=ExampleCo
+
+# complex parameters: arrays and nested types need JSON
+python3 client/scene7api.py --method getAssetsByName \
+    --params-json '{"companyHandle":"c|12345","nameArray":{"items":["hero","banner"]}}'
+
+# machine-readable output
+python3 client/scene7api.py --method getCompanyInfo --params companyName=ExampleCo --json
+
+# what can I call?
+python3 client/scene7api.py --list-methods
+
+# credentials on the HTTP session instead of in the envelope
+python3 client/scene7api.py --auth-mode basic --method getCompanyInfo --params companyName=ExampleCo
+```
+
+### Arguments
+
+| Argument | Purpose |
+|---|---|
+| `--method` | Operation to call |
+| `--params` | `key=value` pairs, split on the **first** `=` only, so handles and base64 values survive |
+| `--params-json` | JSON object merged over `--params`; the only way to express arrays and nested types |
+| `--auth-config` | Path to the auth config (default `auth_config.json`) |
+| `--command-config` | Path to the command config (default `command_config.json`) |
+| `--region` | `na`, `emea` or `apac`; overrides the config endpoints |
+| `--auth-mode` | `soap` (default) or `basic` |
+| `--json` | Print the response as JSON |
+| `--list-methods` | List every operation the WSDL exposes, then exit |
+| `--debug` | Log the SOAP exchange, with the password redacted |
+
+`--debug` prints the full request and response envelopes. The password is replaced with `***REDACTED***` in anything the client prints, including error messages, which can otherwise quote the arguments back.
+
+The exit code is 0 when every command succeeded and 1 when any failed, so the client can be used in a shell pipeline.
+
+## Tests
 
 ```bash
-python3 scene7api.py --method getCompanyInfo --params companyName=Planetary anotherParam=value --debug
+python3 -m pytest tests -q
 ```
 
-### Running the Script without Command-Line Parameters
+68 tests, no network access: the SOAP client is faked, because the mistakes worth guarding against are about the shape of the call rather than about what the server says back. The suite has been checked by mutation, that is, by reintroducing each bug and confirming the intended test fails.
 
-If you do not provide command-line parameters, the script will fall back to using the `command_config.json` file:
+## Demo video
 
-```bash
-python3 scene7api.py
-```
-
-### Help Function
-
-You can display the help message by running:
-
-```bash
-python3 scene7api.py --help
-```
-
-This will display a help message with descriptions of the available command-line arguments and an example of how to use the script.
-
-```plaintext
-usage: scene7api.py [--method METHOD] [--params PARAMS [PARAMS ...]] [--debug]
-
-Scene7 API Client
-
-optional arguments:
-  --method METHOD     API method to call
-  --params PARAMS [PARAMS ...]
-                      Key-value pairs of parameters for the API method (e.g., key1=value1 key2=value2)
-  --debug             Enable debug logging
-
-Example usage:
-  python3 scene7api.py --method getCompanyInfo --params companyName=Planetary anotherParam=value
-
-You can also use the command_config.json file to specify the commands.
-Commands provided as script parameters take precedence over the configuration file.
-```
-
-## Demo Video
-
-A demo video demonstrating the usage of the script is available in the `demo` subfolder. You can watch the video by opening `demo/scene7api.mp4`.
-
-## Script Details
-
-### scene7api.py
-
-This Python script interfaces with Adobe's Scene7 IPS Web Service WSDL via SOAP. It supports both configuration file and command-line parameters for specifying API method calls and parameters.
-
-#### Key Functions
-
-- **load_config**: Loads JSON configuration files.
-- **setup_logging**: Sets up logging for debugging.
-- **create_client**: Creates a SOAP client using the `zeep` library.
-- **list_available_methods**: Lists available API methods.
-- **execute_command**: Executes the specified API command.
-- **print_history**: Prints the raw SOAP request and response history if debugging is enabled.
-- **parse_command_line_args**: Parses command-line arguments.
-
-## Example Configuration
-
-### auth_config.json
-
-```json
-{
-    "username": "your_username",
-    "password": "your_password",
-    "wsdl_url": "https://s7sps3apissl.scene7.com/scene7/webservice/IpsApi-2014-04-03.wsdl",
-    "service_url": "https://s7sps3apissl.scene7.com/scene7/services/IpsApiService",
-    "debug": true
-}
-```
-
-### command_config.json
-
-```json
-{
-    "commands": [
-        {
-            "name": "getCompanyInfo",
-            "params": {
-                "companyName": "Planetary"
-            }
-        }
-    ]
-}
-```
+`demo/scene7api.mp4` shows the earlier version in use.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a pull request or open an issue if you have any suggestions or improvements.
+Pull requests and issues are welcome.
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+MIT. See [LICENSE](LICENSE).
