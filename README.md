@@ -31,11 +31,16 @@ Both modes work. The SOAP header is the default, because it is what the WSDL dec
 
 ## Prerequisites
 
-Python 3.x, plus:
+Python 3.10 or later. Use a virtual environment:
 
 ```bash
-pip install zeep requests lxml
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 ```
+
+A virtual environment is tied to the Python it was created with. If that interpreter is removed or upgraded
+(for example by Homebrew), `.venv/bin/python` disappears and the client fails with `ModuleNotFoundError`
+or "No such file or directory". Delete `.venv` and create it again.
 
 ## Configuration
 
@@ -128,6 +133,36 @@ python3 client/scene7api.py --auth-mode basic --method getCompanyInfo --params c
 `--debug` prints the full request and response envelopes. The password is replaced with `***REDACTED***` in anything the client prints, including error messages, which can otherwise quote the arguments back.
 
 The exit code is 0 when every command succeeded and 1 when any failed, so the client can be used in a shell pipeline.
+
+## Recipes
+
+### Counting and listing assets with `searchAssets`
+
+`totalRows` counts **every** asset type, including Smart Crop records, but `assetArray` never returns
+Smart Crop records. Without a type filter, pages therefore come back short (about a dozen rows
+regardless of `recordsPerPage`), which looks like a paging cap and is not one.
+
+- **To count**, ask for one row and read `totalRows`:
+
+  ```bash
+  python3 client/scene7api.py --region emea --method searchAssets --json --params-json \
+    '{"companyHandle":"c|12345","folder":"examplecompany/images/","includeSubfolders":true,"recordsPerPage":1,"resultsPage":1}'
+  ```
+
+- **To list**, filter by type, and pages come back full:
+
+  ```bash
+  python3 client/scene7api.py --region emea --method searchAssets --json --params-json \
+    '{"companyHandle":"c|12345","folder":"examplecompany/images/","includeSubfolders":true,
+      "assetTypeArray":{"items":["Image"]},"recordsPerPage":50,"resultsPage":1}'
+  ```
+
+### Who put this content here, and when
+
+Each `searchAssets` row carries `created`, `createUser`, `lastModified` and `lastModifyUser`. Reading the
+first, a middle and the last page of a folder dates when it was filled and by which user, which is usually
+the integration (sync) user of the system that uploaded it. This is the quickest way to tell a deliberate
+upload from a bulk sync by another environment.
 
 ## Tests
 
